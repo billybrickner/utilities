@@ -9,7 +9,7 @@ N=2 # Number of lines to go back in history. i
     # Default 2 because we want to exclude N=1 which should be
     # running this script
 last_command() {
-    fc -l -n -$N -$N | sed -e 's/\s*\(\w[^\n]*\w\)\s*$/\1/g' -e 's/\([$"]\)/\\\1/g' 
+    fc -l -n -$N -$N | sed -e 's/\s*\(\S[^\n]*\S\)\s*$/\1/g' -e 's/\([$"]\)/\\\1/g' 
 }
 
 # Echo last command to be able to load script into file
