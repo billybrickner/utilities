@@ -5,6 +5,7 @@ set shiftround
 set smarttab
 set shiftwidth=4
 set tabstop=4
+set softtabstop=4
 set hlsearch
 set smartcase
 set mouse=a                 " All mouse options
@@ -30,6 +31,16 @@ set number
 set colorcolumn=80,100,120
 hi ColorColumn ctermbg=grey guibg=grey
 set noequalalways "Splits don't change window width
+set ruler
+set showcmd
+set confirm
+set showfulltag
+highlight ExtraWhitespace ctermbg=red guibg=red
+match ExtraWhitespace /\s\+$/
+autocmd BufWinEnter * match ExtraWhitespace /\s\+$/ 
+autocmd InsertEnter * match ExtraWhitespace /\s\+\%#\@<!$/ 
+autocmd InsertLeave * match ExtraWhitespace /\s\+$/ 
+autocmd BufWinLeave * call clearmatches()
 
 " File options
 set tabpagemax=50
