@@ -1,1 +1,1 @@
-ctags -R -o ~/mytags .
+ctags -R .
