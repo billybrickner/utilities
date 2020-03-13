@@ -13,3 +13,6 @@ cp ~/.vimrc ~/utilities
 
 # Add scripts to PATH
 export PATH="$PATH:$HOME/utilities/scripts"
+
+# qemu alias since this is an x86-64 system
+alias qemu=qemu-system-x86_64

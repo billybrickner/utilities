@@ -47,4 +47,3 @@ set tabpagemax=50
 set dir=~/.cache/vim
 set formatoptions+=j
 set history=1000
-set tags=~/mytags
