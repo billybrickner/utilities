@@ -37,9 +37,9 @@ set confirm
 set showfulltag
 highlight ExtraWhitespace ctermbg=red guibg=red
 match ExtraWhitespace /\s\+$/
-autocmd BufWinEnter * match ExtraWhitespace /\s\+$/ 
-autocmd InsertEnter * match ExtraWhitespace /\s\+\%#\@<!$/ 
-autocmd InsertLeave * match ExtraWhitespace /\s\+$/ 
+autocmd BufWinEnter * match ExtraWhitespace /\s\+$/
+autocmd InsertEnter * match ExtraWhitespace /\s\+\%#\@<!$/
+autocmd InsertLeave * match ExtraWhitespace /\s\+$/
 autocmd BufWinLeave * call clearmatches()
 
 " File options
@@ -47,3 +47,4 @@ set tabpagemax=50
 set dir=~/.cache/vim
 set formatoptions+=j
 set history=1000
+set tags+=tags;/
