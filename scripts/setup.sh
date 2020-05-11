@@ -10,5 +10,5 @@ mkdir vim
 cd ../
 cp utilities/.vimrc .
 source .bashrc
-gitSetup.sh
 popd
+gitSetup.sh
