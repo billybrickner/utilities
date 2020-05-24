@@ -13,6 +13,9 @@ set wildmenu
 set laststatus=2            " Always shoe last status
 set backspace=2             " Backspace past eol and start of insert
 set clipboard=autoselect    " Yanks stay on clipboard across vim sessions
+set noerrorbells
+set belloff=all
+
 " Spell setup
 syntax enable
 set spell
