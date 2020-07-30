@@ -1,14 +1,15 @@
 #!/bin/bash
+PATH_TO_PROFILES=~/utilities/profile
 pushd ~
-echo '. ~/utilities/.my_bash_profile.sh' >> .bashrc
+echo ". $PATH_TO_PROFILES/.my_bash_profile.sh" >> .bashrc
 mkdir .vim
-cd .vim
+pushd .vim
 mkdir spell
-cd ../
-cd .cache
+popd
+pushd .cache
 mkdir vim
-cd ../
-cp utilities/.vimrc .
+popd
+cp $PATH_TO_PROFILES/.vimrc .
 source .bashrc
 popd
 gitSetup.sh

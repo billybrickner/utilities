@@ -13,7 +13,7 @@ for D in */; do
     pushd $D > /dev/null
     git fetch
     git fetch upstream
-    if [$(git_branch) = 'master' ]; then
+    if [ $(git_branch) = 'master' ]; then
         update_in_curr_dir
     fi
     popd > /dev/null
