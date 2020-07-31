@@ -9,6 +9,7 @@ set softtabstop=4
 set hlsearch
 set smartcase
 set mouse=a                 " All mouse options
+set ttymouse=xterm2         " Mouse drag events
 set wildmenu
 set laststatus=2            " Always shoe last status
 set backspace=2             " Backspace past eol and start of insert
