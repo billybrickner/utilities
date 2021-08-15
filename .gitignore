@@ -1,2 +1,5 @@
 # Protected scripts
 *.shx
+
+# Local files
+*.local
