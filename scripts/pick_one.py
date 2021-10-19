@@ -13,7 +13,9 @@ def getNextChoice(choices):
    return input("\toption %2d:" % (len(choices) + 1))
 
 def prettyPrint(choices):
-   print("Choices: " + ", ".join(choices))
+   choices = [choice.strip() for choice in choices]
+   choices = [choice.replace(" ","_") for choice in choices]
+   print("Choices: " + " ".join(choices))
 
 def roll(choices):
    path_to_loser_messages = str(os.environ["HOME"]) + "/utilities/profiles/loserMessages.txt"
