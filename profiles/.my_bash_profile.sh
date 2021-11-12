@@ -16,3 +16,6 @@ export PATH="$PATH:$HOME/utilities/scripts"
 
 # qemu alias since this is an x86-64 system
 alias qemu=qemu-system-x86_64
+
+# Get Julia to work
+export LD_LIBRARY_PATH="/usr/lib/wsl/lib/:"
