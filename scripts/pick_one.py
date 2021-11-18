@@ -31,9 +31,13 @@ def roll(choices):
    time.sleep(2)
 
 def getChoices():
-   choices = []
 
    print("Enter your choices:")
+
+   path_to_defaults = str(os.environ['HOME']) + '/utilities/profiles/defaultChoices.txt'
+   choices = getMessages(path_to_defaults)
+   for i, choice in enumerate(choices):
+        print("\toption %2d: %s" % (i + 1, choice))
 
    choice = getNextChoice(choices)
    while ((choice != "") or (len(choices) < 2)):

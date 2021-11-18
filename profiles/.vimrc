@@ -1,15 +1,21 @@
+call plug#begin()
+
+Plug 'JuliaEditorSupport/julia-vim'
+
+call plug#end()
+
 " Text entry related options
 set autoindent
 set expandtab
 set shiftround
 set smarttab
-set shiftwidth=3
-set tabstop=3
-set softtabstop=3
+set shiftwidth=4
+set tabstop=4
+set softtabstop=4
 set hlsearch
 set smartcase
 set mouse=a                 " All mouse options
-set ttymouse=xterm2         " Mouse drag events
+set ttymouse=sgr            " Mouse drag events
 set wildmenu
 set laststatus=2            " Always shoe last status
 set backspace=2             " Backspace past eol and start of insert

@@ -19,3 +19,4 @@ alias qemu=qemu-system-x86_64
 
 # Get Julia to work
 export LD_LIBRARY_PATH="/usr/lib/wsl/lib/:"
+export JULIA_NUM_THREADS=16
