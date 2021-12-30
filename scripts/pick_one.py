@@ -10,7 +10,7 @@ def getMessages(filename):
    return messages
 
 def getNextChoice(choices):
-   return input("\toption %2d:" % (len(choices) + 1))
+   return input("\toption %2d: " % (len(choices) + 1))
 
 def prettyPrint(choices):
    choices = [choice.strip() for choice in choices]
