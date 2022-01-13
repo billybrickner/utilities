@@ -66,8 +66,12 @@ def pickOne():
       choices = getChoices()
 
    prettyPrint(choices)
+   moreChoices = True
    while len(choices) > 1:
       roll(choices)
+      if (len(choices) == 3) and moreChoices:
+         choices += ['roll again', 'continue']
+         moreChoices = False
       if (len(choices) % 5 == 0):
          print()
          prettyPrint(choices)
