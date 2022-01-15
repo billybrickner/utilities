@@ -65,16 +65,29 @@ def pickOne():
    if len(choices) < 2:
       choices = getChoices()
 
-   prettyPrint(choices)
-   moreChoices = True
-   while len(choices) > 1:
-      roll(choices)
-      if (len(choices) == 3) and moreChoices:
-         choices += ['roll again', 'continue']
-         moreChoices = False
-      if (len(choices) % 5 == 0):
-         print()
-         prettyPrint(choices)
+   roll_again = True
+   starting_choices = [] + choices
+   while roll_again:
+    prettyPrint(choices)
+    moreChoices = True
+    while len(choices) > 1:
+        roll(choices)
+        if (len(choices) == 3) and moreChoices:
+            finalists = [] + choices
+            choices += ['roll again', 'continue']
+            moreChoices = False
+        if (len(choices) % 5 == 0):
+            print()
+            prettyPrint(choices)
+    if choices[0] != 'roll again':
+        roll_again = False
+    else:
+        print("Winner: roll again")
+        print("rerolling")
+        print()
+        print()
+        time.sleep(3)
+        choices = starting_choices + finalists
 
    print("Winner:", choices[0])
 
