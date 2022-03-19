@@ -74,7 +74,7 @@ def pickOne():
         roll(choices)
         if (len(choices) == 3) and moreChoices:
             finalists = [] + choices
-            choices += ['roll again', 'continue']
+            choices += ['roll again']
             moreChoices = False
         if (len(choices) % 5 == 0):
             print()
@@ -88,8 +88,15 @@ def pickOne():
         print()
         time.sleep(3)
         choices = starting_choices + finalists
+   altEnding = False
+   if ('awful' in choices[0]):
+        if (random.randrange(100) == 0):
+            print("Alternate Ending")
+            print("Winner:", "Neil Breen")
+            altEnding = True
 
-   print("Winner:", choices[0])
+   if altEnding == False:
+        print("Winner:", choices[0])
 
 def main():
    pickOne()
