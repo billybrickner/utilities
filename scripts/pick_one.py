@@ -18,15 +18,16 @@ def prettyPrint(choices):
    print("Choices: " + " ".join(choices))
 
 def roll(choices):
-   path_to_loser_messages = str(os.environ["HOME"]) + "/utilities/profiles/loserMessages.txt"
-   loserMessages = getMessages(path_to_loser_messages)
-
+   global loserMessages
+   global path_to_loser_messages
    print("rolling",end="", flush=True)
    for i in range(3):
       time.sleep(0.6)
       print(".", end="",flush=True)
    choice = choices.pop(random.randrange(len(choices)))
-   message = loserMessages[random.randrange(len(loserMessages))]
+   if len(loserMessages) == 0:
+       loserMessages =  getMessages(path_to_loser_messages)
+   message = loserMessages.pop(random.randrange(len(loserMessages)))
    print("\n\"%s\" %s" % (choice, message))
    time.sleep(2)
 
@@ -92,7 +93,7 @@ def pickOne():
    if ('awful' in choices[0]):
         if (random.randrange(100) == 0):
             print("Alternate Ending")
-            print("Winner:", "Neil Breen")
+            print("Winner:", "Seinfeld")
             altEnding = True
 
    if altEnding == False:
@@ -101,6 +102,8 @@ def pickOne():
 def main():
    pickOne()
 
+path_to_loser_messages = str(os.environ["HOME"]) + "/utilities/profiles/loserMessages.txt"
+loserMessages = getMessages(path_to_loser_messages)
 if __name__ == '__main__':
    main()
 
