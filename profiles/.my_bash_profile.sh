@@ -20,3 +20,9 @@ alias qemu=qemu-system-x86_64
 # Get Julia to work
 export LD_LIBRARY_PATH="/usr/lib/wsl/lib/:"
 export JULIA_NUM_THREADS=16
+
+export PYENV_ROOT="$HOME/.pyenv"
+command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init -)"
+
+eval "$(pyenv virtualenv-init -)"
