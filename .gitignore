@@ -3,5 +3,4 @@
 
 # Local files
 *.local
-
-*~$*
+*/local/*
