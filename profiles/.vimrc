@@ -1,6 +1,7 @@
 call plug#begin()
 
 Plug 'JuliaEditorSupport/julia-vim'
+Plug 'czheo/mojo.vim'
 
 call plug#end()
 
