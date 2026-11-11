@@ -71,6 +71,7 @@ SHOW_ODDS      = True
 SENTINEL       = "PY:"
 ROLL_PAUSE, RESULT_PAUSE, REROLL_PAUSE = 0.6, 2, 3
 PROFILE_DIR = os.path.join(os.path.expanduser("~"), "utilities", "profiles")
+REPEAT_KEY = "."   # type this at an option prompt to repeat the previous option
 LAST_CHOICES_FILE = os.path.join(tempfile.gettempdir(), "pick_one_last_%s.json" % getpass.getuser())   # for --again (/tmp on Linux)
 FALLBACK_LOSER_MESSAGES = ["is out.", "has been eliminated.", "didn't make it."]
 # ========================================================================
@@ -470,7 +471,7 @@ def interpret(raw, index, confirm=True):
     return t
 
 def getChoices(entries, ask, index):
-    print("Enter your choices (Tab/autocomplete from the board, blank line to roll):")
+    print("Enter your choices (autocomplete from the board, \"%s\" repeats the last one, blank line to roll):" % REPEAT_KEY)
     defaultsPath = os.path.join(PROFILE_DIR, "defaultChoices.txt")
     if os.path.exists(defaultsPath):
         for line in getMessages(defaultsPath):
@@ -486,6 +487,11 @@ def getChoices(entries, ask, index):
                 return entries
             print("Try again")
             print(entries)
+            continue
+        if raw.strip() == REPEAT_KEY:
+            if entries:
+                entries.append(entries[-1])
+                print("\t  -> %s again" % entries[-1])
             continue
         name = interpret(raw, index)
         if name:
