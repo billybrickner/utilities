@@ -61,6 +61,11 @@ DEFAULT_EPISODES = 1
 ASK_EPISODES     = True
 
 LOOKUP_ANILIST = True     # fill in ep_len / total_eps from AniList the first time a card is seen (then cached)
+
+# MyAnimeList: watched / total_eps come from this user's public list when a card matches a MAL entry.
+# A card matches by mal_id in its PY: comment, a myanimelist.net/anime/<id> link in its description,
+# or a title equal to the MAL title (English or romaji, ignoring case and punctuation). "" turns it off.
+MAL_USER = os.environ.get("MAL_USER", "hello_1995")
 SHOW_ODDS      = True
 SENTINEL       = "PY:"
 ROLL_PAUSE, RESULT_PAUSE, REROLL_PAUSE = 0.6, 2, 3
@@ -74,7 +79,7 @@ ONLINE = bool(KEY and TOKEN)
 DRY_RUN = False
 REFRESH_EPS = False
 ME = None
-ANIME_FIELDS = ["watched", "total_eps", "ep_len", "submitted_since_roll", "wins", "last_rolled"]
+ANIME_FIELDS = ["watched", "total_eps", "ep_len", "submitted_since_roll", "wins", "last_rolled", "mal_id"]
 SLOP_FIELDS = ["wins", "submitted_since_roll", "watched", "last_rolled"]
 
 
@@ -104,13 +109,13 @@ def loadBoard():
     try:
         ME = trello("GET", "members/me", fields="id")["id"]
         lists = {l["id"]: l["name"] for l in trello("GET", "boards/%s/lists" % BOARD_ID, fields="name")}
-        cards = trello("GET", "boards/%s/cards" % BOARD_ID, fields="name,idList")
+        cards = trello("GET", "boards/%s/cards" % BOARD_ID, fields="name,idList,desc")
     except Exception as e:
         print("Couldn't reach Trello (%s): running offline (no autocomplete, nothing saved)." % e)
         ONLINE = False
         return board
     for c in cards:
-        card = {"id": c["id"], "name": c["name"].strip(), "list": lists.get(c["idList"], "")}
+        card = {"id": c["id"], "name": c["name"].strip(), "list": lists.get(c["idList"], ""), "desc": c.get("desc", "")}
         if card["list"].lower() == DATA_LIST.lower():
             if card["name"].lower() == DATA_CARD.lower():
                 board.dataCard = card
@@ -171,10 +176,15 @@ def saveStats(choice):
 
 # ------------------------------- AniList --------------------------------
 
-def anilistLookup(title):
+def anilistLookup(title, malId=None):
     """(ep_len, total_eps, matched title); (None, None, None) if no match; None on network error."""
-    query = "query($s:String){Media(search:$s,type:ANIME){episodes duration title{english romaji}}}"
-    body = json.dumps({"query": query, "variables": {"s": title}}).encode()
+    if malId:
+        query = "query($m:Int){Media(idMal:$m,type:ANIME){episodes duration title{english romaji}}}"
+        variables = {"m": int(malId)}
+    else:
+        query = "query($s:String){Media(search:$s,type:ANIME){episodes duration title{english romaji}}}"
+        variables = {"s": title}
+    body = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request("https://graphql.anilist.co", data=body,
                                  headers={"Content-Type": "application/json", "Accept": "application/json"})
     try:
@@ -187,6 +197,52 @@ def anilistLookup(title):
     if not media:
         return (None, None, None)
     return media.get("duration"), media.get("episodes"), media["title"].get("english") or media["title"].get("romaji")
+
+
+# ----------------------------- MyAnimeList ------------------------------
+
+def normTitle(s):
+    return re.sub(r"[\W_]+", "", (s or "").lower())
+
+def malFetchPage(offset):
+    url = "https://myanimelist.net/animelist/%s/load.json?status=7&offset=%d" % (urllib.parse.quote(MAL_USER), offset)
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (picker.py)", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return json.load(resp)
+
+_mal = None
+def malList():
+    """Whole MAL list (all statuses), loaded once per run: {"byId": {...}, "byTitle": {...}}."""
+    global _mal
+    if _mal is None:
+        _mal = {"byId": {}, "byTitle": {}}
+        if MAL_USER:
+            try:
+                offset = 0
+                while True:
+                    items = malFetchPage(offset)
+                    for it in items:
+                        _mal["byId"][int(it["anime_id"])] = it
+                        for t in (it.get("anime_title"), it.get("anime_title_eng")):
+                            if normTitle(t):
+                                _mal["byTitle"].setdefault(normTitle(t), it)
+                    if len(items) < 300:
+                        break
+                    offset += len(items)
+                print("  MyAnimeList: loaded %d entries for %s" % (len(_mal["byId"]), MAL_USER))
+            except Exception as e:
+                print("  couldn't load MyAnimeList for %s (%s), using saved episode counts" % (MAL_USER, e))
+    return _mal
+
+def malEntry(choice):
+    mal = malList()
+    malId = num(choice.stats, "mal_id")
+    if malId is None:
+        m = re.search(r"myanimelist\.net/anime/(\d+)", (choice.card or {}).get("desc", ""))
+        malId = int(m.group(1)) if m else None
+    if malId is not None:
+        return mal["byId"].get(int(malId))
+    return mal["byTitle"].get(normTitle(choice.name))
 
 
 # ------------------------------- Choices --------------------------------
@@ -204,6 +260,7 @@ class Choice:
         self.fair = name.lower() in {f.lower() for f in FAIR_ODDS}
         self.weight = self.momentum = self.progress = 0.0
         self.p = 0.0
+        self.fromMal = False
 
 def loadStats(choice, board):
     if choice.card and ONLINE:
@@ -218,13 +275,20 @@ def loadStats(choice, board):
         if num(st, k) is None:
             st[k] = 0
     if choice.kind == "anime":
+        entry = malEntry(choice) if MAL_USER else None
+        if entry:
+            choice.fromMal = True
+            st["mal_id"] = int(entry["anime_id"])
+            st["watched"] = int(entry.get("num_watched_episodes") or 0)
+            if entry.get("anime_num_episodes"):
+                st["total_eps"] = int(entry["anime_num_episodes"])
         # ep_len / total_eps are cached in the card's PY: comment. AniList is only asked when a card
         # has never been looked up (or the last lookup hit a network error), or with --refresh-eps.
         # "?" means "looked up, not found / still airing" and is cached too.
         fields = ("ep_len", "total_eps")
         cached = all(k in st and st[k] != "retry" for k in fields)
         if LOOKUP_ANILIST and (REFRESH_EPS or not cached):
-            info = anilistLookup(choice.name)
+            info = anilistLookup(choice.name, num(st, "mal_id"))
             if info is None:
                 for k in fields:
                     if num(st, k) is None:
@@ -240,6 +304,7 @@ def loadStats(choice, board):
                     print('  AniList: no match for "%s" (edit ep_len / total_eps in its PY: comment)' % choice.name)
         for k in fields:
             st.setdefault(k, None)
+        st.setdefault("mal_id", None)
     computeWeight(choice)
 
 def computeWeight(choice):
@@ -523,7 +588,7 @@ def slopRoll(slopChoice, board, choices):
 def askEpisodes(choice):
     listName = (choice.card or {}).get("list", "").lower()
     default = {k.lower(): v for k, v in EPISODES_BY_LIST.items()}.get(listName, DEFAULT_EPISODES)
-    if not ASK_EPISODES or choice.kind == "unknown":
+    if not ASK_EPISODES or choice.kind == "unknown" or choice.fromMal:
         return default
     raw = input("Episodes of %s you're watching? [%d] " % (choice.name, default)).strip()
     try:
@@ -610,7 +675,10 @@ def saveResults(choices, winner, watching, episodes):
         watching.stats["submitted_since_roll"] = 0
         watching.stats["wins"] = num(watching.stats, "wins", 0) + 1
         watching.stats["last_rolled"] = today
-    watching.stats["watched"] = num(watching.stats, "watched", 0) + (episodes if watching.kind != "slop" else 0)
+    if watching.fromMal:
+        print("(%s's episode count comes from MyAnimeList, update it there)" % watching.name)
+    else:
+        watching.stats["watched"] = num(watching.stats, "watched", 0) + episodes
 
     toSave = choices + ([watching] if watching not in choices else [])
     saved = 0
