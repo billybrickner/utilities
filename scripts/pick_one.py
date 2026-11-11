@@ -1,4 +1,4 @@
-#! /usr/bin/env python3
+#!/usr/bin/env -S uv run --script --env-file ${HOME}/utilities/animeList.env
 # /// script
 # requires-python = ">=3.8"
 # dependencies = ["prompt_toolkit"]
