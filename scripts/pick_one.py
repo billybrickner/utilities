@@ -9,6 +9,7 @@ Anime picker backed by a Trello board.
   picker.py                        type choices (autocompletes from the board), blank line to roll
   picker.py "Frieren" "One Piece"  seed choices from the command line
   picker.py --dry-run              roll normally but don't write anything to Trello
+  picker.py --again (-a)           roll again with the same choices as last time
   picker.py --refresh-eps          re-fetch episode length / count from AniList (normally cached)
 
 Needs TRELLO_KEY and TRELLO_TOKEN in the environment.
@@ -20,7 +21,7 @@ Stats live in a comment on each card starting with "PY:". Slop / Lslop stats liv
 in those comments (e.g. fix ep_len or total_eps) and the script will use your edits.
 """
 
-import time, random, argparse, os, sys, json, re, datetime
+import time, random, argparse, os, sys, json, re, datetime, tempfile, getpass
 import urllib.request, urllib.parse, urllib.error
 
 # ================================ CONFIG ================================
@@ -70,6 +71,7 @@ SHOW_ODDS      = True
 SENTINEL       = "PY:"
 ROLL_PAUSE, RESULT_PAUSE, REROLL_PAUSE = 0.6, 2, 3
 PROFILE_DIR = os.path.join(os.path.expanduser("~"), "utilities", "profiles")
+LAST_CHOICES_FILE = os.path.join(tempfile.gettempdir(), "pick_one_last_%s.json" % getpass.getuser())   # for --again (/tmp on Linux)
 FALLBACK_LOSER_MESSAGES = ["is out.", "has been eliminated.", "didn't make it."]
 # ========================================================================
 
@@ -611,6 +613,7 @@ def getCmdLineArgs():
                         help='choices to choose from. Space delimited.')
     parser.add_argument('--dry-run', action='store_true', help="don't write anything to Trello")
     parser.add_argument('--refresh-eps', action='store_true', help='re-fetch episode length / count from AniList')
+    parser.add_argument('-a', '--again', action='store_true', help='reuse the choices from the last run')
     return parser.parse_args()
 
 def pickOne():
@@ -626,12 +629,26 @@ def pickOne():
     ask, mode = makePrompter(names)
     print("Autocomplete: %d shows from the board, %s." % (len(names) - 2, mode))
 
-    entries = [index.get(f.lower(), f) for f in FAIR_ODDS]
+    entries = []
+    if args.again:
+        try:
+            with open(LAST_CHOICES_FILE) as f:
+                entries = json.load(f)
+            print("Same choices as last time: " + ", ".join(entries))
+        except (OSError, ValueError):
+            print("No previous choices saved yet, enter them below.")
+    if not entries:
+        entries = [index.get(f.lower(), f) for f in FAIR_ODDS]
     for n in (interpret(a, index) for a in args.choices):
         if n:
             entries.append(n)
     if len(entries) < 2:
         entries = getChoices(entries, ask, index)
+    try:
+        with open(LAST_CHOICES_FILE, "w") as f:
+            json.dump(entries, f)
+    except OSError:
+        pass
 
     choices = buildChoices(entries, board)
     if ONLINE:
