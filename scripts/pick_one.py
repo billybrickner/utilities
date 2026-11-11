@@ -186,13 +186,18 @@ def anilistLookup(title, malId=None):
         variables = {"s": title}
     body = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request("https://graphql.anilist.co", data=body,
-                                 headers={"Content-Type": "application/json", "Accept": "application/json"})
+                                 headers={"Content-Type": "application/json", "Accept": "application/json",
+                                          "User-Agent": "Mozilla/5.0 (picker.py)"})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             media = json.load(resp)["data"]["Media"]
     except urllib.error.HTTPError as e:
-        return (None, None, None) if e.code == 404 else None
-    except Exception:
+        if e.code == 404:
+            return (None, None, None)
+        print("  AniList error: HTTP %s %s" % (e.code, e.reason))
+        return None
+    except Exception as e:
+        print("  AniList error: %s" % e)
         return None
     if not media:
         return (None, None, None)
@@ -202,7 +207,7 @@ def anilistLookup(title, malId=None):
 # ----------------------------- MyAnimeList ------------------------------
 
 def normTitle(s):
-    return re.sub(r"[\W_]+", "", (s or "").lower())
+    return re.sub(r"[\W_]+", "", str(s if s is not None else "").lower())   # MAL sends titles like 86 as numbers
 
 def malFetchPage(offset):
     url = "https://myanimelist.net/animelist/%s/load.json?status=7&offset=%d" % (urllib.parse.quote(MAL_USER), offset)
