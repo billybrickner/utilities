@@ -31,16 +31,19 @@ BOARD_ID = os.environ.get("TRELLO_BOARD", "688ffb0448f639e7f0dd2ea3")   # Anime 
 #   weight   = votes * (BASE_WEIGHT + momentum + progress) * reroll_boost
 #   momentum = MOMENTUM_WEIGHT * (1 + d + d^2 + ... + d^(s-1))     s = times submitted since it last won
 #              -> pity that builds with every miss and levels off at MOMENTUM_WEIGHT / (1 - d)
-#   progress = PROGRESS_WEIGHT * (watched / total_eps) * (REFERENCE_EP_LEN / ep_len)
-#              -> closer to done = bigger, shorter episodes = bigger, 0 if total_eps is unknown
-# A brand-new card has s = 0 and watched = 0, so it just gets BASE_WEIGHT.
+#   progress = PROGRESS_WEIGHT * (2 * FINISH_SCALE / (FINISH_SCALE + minutes_left) - 1)
+#              minutes_left = (total_eps - watched) * ep_len
+#              -> little time left (nearly done, or short episodes) = up to +PROGRESS_WEIGHT
+#              -> lots of time left (just started, long show)     = down to -PROGRESS_WEIGHT
+#              -> exactly FINISH_SCALE minutes left = 0; 0 if total_eps is unknown
+# Weight never drops below MIN_WEIGHT, so every choice keeps some chance.
 BASE_WEIGHT      = 1.0
 MOMENTUM_WEIGHT  = 0.5    # pity added by the first miss
 MOMENTUM_DECAY   = 0.8    # d, between 0 and 1. Max pity = 0.5 / (1 - 0.8) = 2.5
-PROGRESS_WEIGHT  = 1.5    # bonus for a finished-or-nearly-finished REFERENCE_EP_LEN-minute show
-REFERENCE_EP_LEN = 24.0   # minutes
+PROGRESS_WEIGHT  = 0.75   # biggest boost (nearly done) and biggest penalty (barely started)
+FINISH_SCALE     = 120.0  # minutes left where the progress term is neutral (~5 episodes of 24 min)
+MIN_WEIGHT       = 0.25
 DEFAULT_EP_LEN   = 24.0   # used when the episode length is unknown
-MIN_EP_LEN       = 12.0   # floor: short episodes can at most double the progress bonus
 
 FAIR_ODDS = ["One Piece"] # in every roll with 1 vote, +1 per extra submission; chance = its votes / total votes
 ALIASES = {"one peice": "One Piece"}   # typed / default-file spellings that mean a board card
@@ -54,7 +57,16 @@ LSLOP_NAME  = "Lslop"
 SLOP_LISTS  = {"One Episode": 1, "Three Episodes": 3}
 LSLOP_LISTS = {"One Episode": 1, "Three Episodes": 3, "Logan's Harem": 1}
 DATA_LIST   = "Trello Data Storing"   # cards here are never offered as choices
-DATA_CARD   = "Slop Count"            # Slop / Lslop stats are stored on this card
+DATA_CARD   = "Slop Count"            # Slop / Lslop / category stats are stored on this card
+
+# Categories: every Trello list can be voted for as "List: <name>". If it wins, it picks a random
+# card from that list. These lists are never offered (matching ignores case, emoji and punctuation).
+CATEGORY_PREFIX = "List: "
+
+# Tags (stub): "tag:<anything>" can be entered as a choice but doesn't roll yet. Reading tags from
+# the board isn't built; tagSuggestions() is where those completions would come from.
+TAG_PREFIX = "tag:"
+EXCLUDED_CATEGORIES = ["Finished", "Gave up -> solo watch", "Trello Data Storing"]
 
 # Episodes credited to the winner (you're asked; this is the default if you just hit Enter)
 EPISODES_BY_LIST = {"One Episode": 1, "Three Episodes": 3, "Logan's Harem": 1}
@@ -65,8 +77,14 @@ LOOKUP_ANILIST = True     # fill in ep_len / total_eps from AniList the first ti
 
 # MyAnimeList: watched / total_eps come from this user's public list when a card matches a MAL entry.
 # A card matches by mal_id in its PY: comment, a myanimelist.net/anime/<id> link in its description,
-# or a title equal to the MAL title (English or romaji, ignoring case and punctuation). "" turns it off.
+# or a title equal to the MAL title (English or romaji, ignoring case and punctuation). If none of
+# those match, you're asked for the MAL link once and it's saved as mal_id ("n" saves mal_id=none,
+# which stops the question; edit the comment to change it). "" turns MAL off.
 MAL_USER = os.environ.get("MAL_USER", "hello_1995")
+# If MAL shows a show as finished, or at JUST_STARTED_EPS episodes or fewer, the MAL count may not be
+# where the group is (e.g. watched solo). Then the card's own count is used, and when the show wins
+# you're asked what episode you're on.
+JUST_STARTED_EPS = 1
 SHOW_ODDS      = True
 SENTINEL       = "PY:"
 ROLL_PAUSE, RESULT_PAUSE, REROLL_PAUSE = 0.6, 2, 3
@@ -102,6 +120,7 @@ class Board:
         self.byName = {}
         self.dataCard = None
         self.comments = {}       # card id -> {tag: (action id, stats)}
+        self.categories = []     # list names that can be voted for as "List: <name>"
 
 def loadBoard():
     global ONLINE, ME
@@ -117,6 +136,8 @@ def loadBoard():
         print("Couldn't reach Trello (%s): running offline (no autocomplete, nothing saved)." % e)
         ONLINE = False
         return board
+    excluded = {normName(n) for n in EXCLUDED_CATEGORIES}
+    board.categories = [n for n in lists.values() if normName(n) not in excluded and normName(n)]
     for c in cards:
         card = {"id": c["id"], "name": c["name"].strip(), "list": lists.get(c["idList"], ""), "desc": c.get("desc", "")}
         if card["list"].lower() == DATA_LIST.lower():
@@ -237,20 +258,51 @@ def malList():
                     if len(items) < 300:
                         break
                     offset += len(items)
+                _mal["ok"] = True
                 print("  MyAnimeList: loaded %d entries for %s" % (len(_mal["byId"]), MAL_USER))
             except Exception as e:
                 print("  couldn't load MyAnimeList for %s (%s), using saved episode counts" % (MAL_USER, e))
     return _mal
 
+def parseMalLink(text):
+    m = re.search(r"myanimelist\.net/anime/(\d+)", text or "")
+    return int(m.group(1)) if m else None
+
+def askMalLink(choice):
+    """Ask for the show's MAL link. Returns an id, "none" (never ask again), or None (skip this time)."""
+    while True:
+        raw = input('  "%s" isn\'t matched on MyAnimeList. Paste its MAL link '
+                    '(Enter = skip, n = never ask): ' % choice.name).strip()
+        if not raw:
+            return None
+        if raw.lower() in ("n", "no", "none", "never"):
+            return "none"
+        malId = parseMalLink(raw) or (int(raw) if raw.isdigit() else None)
+        if malId:
+            return malId
+        print("  That isn't a link like https://myanimelist.net/anime/52991/Sousou_no_Frieren, try again.")
+
 def malEntry(choice):
+    """Find the card's MAL entry. Asks for a link if nothing matches; stores the id in its stats."""
     mal = malList()
-    malId = num(choice.stats, "mal_id")
-    if malId is None:
-        m = re.search(r"myanimelist\.net/anime/(\d+)", (choice.card or {}).get("desc", ""))
-        malId = int(m.group(1)) if m else None
+    st = choice.stats
+    malId = num(st, "mal_id") or parseMalLink((choice.card or {}).get("desc", ""))
     if malId is not None:
+        st["mal_id"] = int(malId)
         return mal["byId"].get(int(malId))
-    return mal["byTitle"].get(normTitle(choice.name))
+    entry = mal["byTitle"].get(normTitle(choice.name))
+    if entry or not mal.get("ok") or str(st.get("mal_id", "")).lower() == "none":
+        return entry
+    answer = askMalLink(choice)
+    if answer == "none":
+        st["mal_id"] = "none"
+    elif answer:
+        st["mal_id"] = answer
+        choice.newMalId = True          # re-look-up episode length by this id
+        if answer not in mal["byId"]:
+            print("  (saved, but it isn't on %s's list yet, so episodes come from the card)" % MAL_USER)
+        return mal["byId"].get(answer)
+    return None
 
 
 # ------------------------------- Choices --------------------------------
@@ -269,6 +321,9 @@ class Choice:
         self.weight = self.momentum = self.progress = 0.0
         self.p = 0.0
         self.fromMal = False
+        self.malEdge = None      # MAL's count when it shows finished / just started
+        self.newMalId = False    # MAL link was just entered at the prompt
+        self.lists = {}          # for slop / category choices: list name -> weight
 
 def loadStats(choice, board):
     if choice.card and ONLINE:
@@ -285,17 +340,22 @@ def loadStats(choice, board):
     if choice.kind == "anime":
         entry = malEntry(choice) if MAL_USER else None
         if entry:
-            choice.fromMal = True
             st["mal_id"] = int(entry["anime_id"])
-            st["watched"] = int(entry.get("num_watched_episodes") or 0)
             if entry.get("anime_num_episodes"):
                 st["total_eps"] = int(entry["anime_num_episodes"])
+            malWatched = int(entry.get("num_watched_episodes") or 0)
+            total = num(st, "total_eps")
+            if malWatched <= JUST_STARTED_EPS or (total and malWatched >= total):
+                choice.malEdge = malWatched      # finished / just started on MAL: ask when it wins
+            else:
+                choice.fromMal = True
+                st["watched"] = malWatched
         # ep_len / total_eps are cached in the card's PY: comment. AniList is only asked when a card
         # has never been looked up (or the last lookup hit a network error), or with --refresh-eps.
         # "?" means "looked up, not found / still airing" and is cached too.
         fields = ("ep_len", "total_eps")
         cached = all(k in st and st[k] != "retry" for k in fields)
-        if LOOKUP_ANILIST and (REFRESH_EPS or not cached):
+        if LOOKUP_ANILIST and (REFRESH_EPS or choice.newMalId or not cached):
             info = anilistLookup(choice.name, num(st, "mal_id"))
             if info is None:
                 for k in fields:
@@ -304,12 +364,14 @@ def loadStats(choice, board):
                 print('  AniList unreachable for "%s", will try again next run' % choice.name)
             else:
                 for k, v in zip(fields, info[:2]):
-                    if REFRESH_EPS or num(st, k) is None:
+                    if REFRESH_EPS or choice.newMalId or num(st, k) is None:
                         st[k] = v
                 if info[2]:
                     print('  AniList: "%s" -> "%s", %s eps x %s min' % (choice.name, info[2], fmt(info[1]), fmt(info[0])))
                 else:
                     print('  AniList: no match for "%s" (edit ep_len / total_eps in its PY: comment)' % choice.name)
+        if entry and entry.get("anime_num_episodes"):      # MAL's episode count beats AniList's
+            st["total_eps"] = int(entry["anime_num_episodes"])
         for k in fields:
             st.setdefault(k, None)
         st.setdefault("mal_id", None)
@@ -323,9 +385,13 @@ def computeWeight(choice):
     choice.progress = 0.0
     total, watched = num(st, "total_eps"), num(st, "watched", 0)
     if choice.kind == "anime" and total and total > 0:
-        epLen = max(num(st, "ep_len") or DEFAULT_EP_LEN, MIN_EP_LEN)
-        choice.progress = PROGRESS_WEIGHT * min(watched / total, 1.0) * REFERENCE_EP_LEN / epLen
-    choice.weight = max(BASE_WEIGHT + choice.momentum + choice.progress, 1e-6)
+        epLen = num(st, "ep_len") or DEFAULT_EP_LEN
+        minutesLeft = max(total - watched, 0) * epLen
+        choice.progress = PROGRESS_WEIGHT * (2 * FINISH_SCALE / (FINISH_SCALE + minutesLeft) - 1)
+    choice.weight = max(BASE_WEIGHT + choice.momentum + choice.progress, MIN_WEIGHT)
+
+def normName(s):
+    return " ".join(re.findall(r"[a-z0-9]+", s.lower()))
 
 def slopPool(board, lists):
     weights = {k.lower(): w for k, w in lists.items()}
@@ -337,6 +403,11 @@ def buildChoices(entries, board):
         if name not in byName:
             if name in (SLOP_NAME, LSLOP_NAME):
                 ch = Choice(name, "slop", board.dataCard, tag=name)
+                ch.lists = LSLOP_LISTS if name == LSLOP_NAME else SLOP_LISTS
+            elif name.startswith(CATEGORY_PREFIX):
+                listName = name[len(CATEGORY_PREFIX):]
+                ch = Choice(name, "slop", board.dataCard, tag="List:" + re.sub(r"\s+", "_", listName))
+                ch.lists = {listName: 1}
             elif name.lower() in board.byName:
                 ch = Choice(name, "anime", board.byName[name.lower()])
             else:
@@ -346,8 +417,8 @@ def buildChoices(entries, board):
         byName[name].votes += 1
     kept = []
     for ch in choices:
-        if ch.kind == "slop" and not slopPool(board, LSLOP_LISTS if ch.name == LSLOP_NAME else SLOP_LISTS):
-            print("%s dropped: its lists are empty or missing." % ch.name)
+        if ch.kind == "slop" and not slopPool(board, ch.lists):
+            print("%s dropped: no cards in it." % ch.name)
             continue
         kept.append(ch)
     return kept
@@ -389,14 +460,31 @@ def showOdds(choices, N, boosts):
 
 # -------------------------------- Input ---------------------------------
 
+def isTag(name):
+    return name.lower().startswith(TAG_PREFIX)
+
+def tagSuggestions(text):
+    """Completions for "tag:..." input. Stub: tags aren't read from the board yet."""
+    return []
+
 def makePrompter(names):
     """Returns (ask function, description of the autocomplete mode in use)."""
     if not sys.stdin.isatty():
         return input, "off (input isn't a terminal)"
     try:
         from prompt_toolkit import prompt as ptPrompt
-        from prompt_toolkit.completion import WordCompleter
-        completer = WordCompleter(names, ignore_case=True, sentence=True, match_middle=True)
+        from prompt_toolkit.completion import Completer, Completion, WordCompleter
+        words = WordCompleter(names, ignore_case=True, sentence=True, match_middle=True)
+
+        class PickerCompleter(Completer):
+            def get_completions(self, document, event):
+                text = document.text_before_cursor
+                if isTag(text):
+                    for t in tagSuggestions(text):
+                        yield Completion(t, start_position=-len(text))
+                else:
+                    yield from words.get_completions(document, event)
+        completer = PickerCompleter()
         state = {"broken": False}
 
         def ask(msg):
@@ -420,6 +508,9 @@ def makePrompter(names):
                        "or `pip install prompt_toolkit`")
 
     def complete(text, state):
+        if isTag(text):
+            opts = tagSuggestions(text)
+            return opts[state] if state < len(opts) else None
         t = text.lower()
         opts = [n for n in names if n.lower().startswith(t)]
         if not opts:
@@ -440,6 +531,12 @@ def interpret(raw, index, confirm=True):
     t = raw.strip()
     if not t:
         return None
+    if isTag(t):
+        rest = t[len(TAG_PREFIX):].strip()
+        if not rest:
+            print("\t  (type something after %s)" % TAG_PREFIX)
+            return None
+        return TAG_PREFIX + rest
     # One Piece (any capitalization) and its aliases (one peice) always become the same single entry
     aliases = {k.lower(): v for k, v in ALIASES.items()}
     aliases.update({f.lower(): f for f in FAIR_ODDS})
@@ -483,7 +580,7 @@ def getChoices(entries, ask, index):
     while True:
         raw = ask("    option %2d: " % (len(entries) + 1))
         if raw.strip() == "":
-            if len(entries) >= 2:
+            if len([e for e in entries if not isTag(e)]) >= 2:
                 return entries
             print("Try again")
             print(entries)
@@ -585,18 +682,38 @@ def rollRound(choices, boosts):
     return winner, ranking[:3]
 
 def slopRoll(slopChoice, board, choices):
-    lists = LSLOP_LISTS if slopChoice.name == LSLOP_NAME else SLOP_LISTS
-    pool = slopPool(board, lists)
-    print("\n%s wins! Digging through the slop bin (%d shows)" % (slopChoice.name, len(pool)))
+    pool = slopPool(board, slopChoice.lists)
+    isCategory = slopChoice.name.startswith(CATEGORY_PREFIX)
+    if isCategory:
+        print("\n%s wins! Picking a show from it (%d shows)" % (slopChoice.name, len(pool)))
+    else:
+        print("\n%s wins! Digging through the slop bin (%d shows)" % (slopChoice.name, len(pool)))
     dramaticRoll()
     card = weightedPick([c for c, _ in pool], [w for _, w in pool])
-    print('\nThe slop bin serves up "%s" (from %s)' % (card["name"], card["list"]))
+    if isCategory:
+        print('\nFrom %s: "%s"' % (card["list"], card["name"]))
+    else:
+        print('\nThe slop bin serves up "%s" (from %s)' % (card["name"], card["list"]))
     for c in choices:
         if c.card and c.card["id"] == card["id"]:
             return c
     pick = Choice(card["name"], "anime", card)
     loadStats(pick, board)
     return pick
+
+def askCurrentEpisode(choice):
+    """When MAL shows the winner as finished or just started, ask where the group actually is."""
+    if choice.malEdge is None:
+        return None
+    total = num(choice.stats, "total_eps")
+    state = "finished" if total and choice.malEdge >= total else "just started"
+    raw = input("MyAnimeList shows %s as %s (%d/%s). What episode are you on? [Enter to skip] "
+                % (choice.name, state, choice.malEdge, fmt(total))).strip()
+    try:
+        return int(raw) if raw else None
+    except ValueError:
+        print("Not a number, skipping")
+        return None
 
 def askEpisodes(choice):
     listName = (choice.card or {}).get("list", "").lower()
@@ -630,10 +747,11 @@ def pickOne():
     REFRESH_EPS = args.refresh_eps
 
     board = loadBoard()
-    names = sorted({c["name"] for c in board.cards}, key=str.lower) + [SLOP_NAME, LSLOP_NAME]
+    names = (sorted({c["name"] for c in board.cards}, key=str.lower) + [SLOP_NAME, LSLOP_NAME]
+             + [CATEGORY_PREFIX + n for n in board.categories])
     index = {n.lower(): n for n in names}
     ask, mode = makePrompter(names)
-    print("Autocomplete: %d shows from the board, %s." % (len(names) - 2, mode))
+    print("Autocomplete: %d shows and %d categories from the board, %s." % (len(board.cards), len(board.categories), mode))
 
     entries = []
     if args.again:
@@ -648,7 +766,7 @@ def pickOne():
     for n in (interpret(a, index) for a in args.choices):
         if n:
             entries.append(n)
-    if len(entries) < 2:
+    if len([e for e in entries if not isTag(e)]) < 2:
         entries = getChoices(entries, ask, index)
     try:
         with open(LAST_CHOICES_FILE, "w") as f:
@@ -656,7 +774,7 @@ def pickOne():
     except OSError:
         pass
 
-    choices = buildChoices(entries, board)
+    choices = buildChoices([e for e in entries if not isTag(e)], board)
     if ONLINE:
         print("Loading stats from Trello...")
     for c in choices:
@@ -685,7 +803,10 @@ def pickOne():
     else:
         print("Winner: %s -> %s" % (winner.name, watching.name))
 
+    currentEp = askCurrentEpisode(watching)
     episodes = askEpisodes(watching)
+    if currentEp is not None:                 # on episode N means N - 1 already watched
+        watching.stats["watched"] = max(currentEp - 1, 0)
     saveResults(choices, winner, watching, episodes)
 
 def saveResults(choices, winner, watching, episodes):
